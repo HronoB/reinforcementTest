@@ -7,19 +7,20 @@ from tkinter import ttk, messagebox
 import numpy as np
 
 
-def _default_weights_path():
+def _default_weights_path(inp_outp_size):
     """Fixed location for the network weights (next to this file if possible)."""
+    name = f"stage_weights_{inp_outp_size[0]}-{inp_outp_size[1]}.npz"
     try:
-        return Path(__file__).resolve().parent / "stage_weights.npz"
+        return Path(__file__).resolve().parent / name
     except NameError:  # e.g. running from an interactive session
-        return Path.cwd() / "stage_weights.npz"
+        return Path.cwd() / name
 
 
 class Controller:
     def __init__(self, stage, net):
         self.stage = stage
         self.net = net
-        self.weights_path = _default_weights_path()
+        self.weights_path = _default_weights_path(net.getDimensions())
 
         self.root = tk.Tk()
         self.root.title("Stage Controller")

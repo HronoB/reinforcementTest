@@ -1,6 +1,7 @@
 import math
 import random
 import time
+from typing import List
 
 import numpy as np
 
@@ -8,7 +9,7 @@ from stageController import Controller
 
 
 
-NUMBER_OF_TARGETS = 1
+NUMBER_OF_TARGETS = 2
 class Stage:
 
 
@@ -118,8 +119,8 @@ class GuidedNetwork:
 
 
     def __init__(self, layers):
-        self.weights = []
-        self.biases = []
+        self.weights : List[np.ndarray] = []
+        self.biases : List[np.ndarray] = []
         for i in range(len(layers)-1):
             self.weights.append(np.random.normal(
                 0,
@@ -155,21 +156,20 @@ class GuidedNetwork:
     def getCopiedShapes(self):
         return [np.zeros(i.shape) for i in self.weights], [np.zeros(i.shape) for i in self.biases]
 
-
-    def backwardsAll(self, samples, expected, learningRate):
-        weightsDecay = 0.0001
+    def applyWeights(self, nW, nB, learningRate, weightsDecay = 0.0001):
         weightsDecay = 1-weightsDecay
-        learningRate /= len(samples)
+        for i in range(len(nW)):
+            self.weights[i] = self.weights[i]*weightsDecay + nW[i]*learningRate
+            self.biases[i] += nB[i]*learningRate
+
+
+    def backwardsAll(self, samples, expected, nW, nB):
         results = []
-        nW, nB = self.getCopiedShapes()
         for samp in range(len(samples)):
             vec = self.forward(samples[samp])
             results.append(vec[-1])
             diff = (np.array(expected[samp])-vec[-1])
             self.backwardsOne(vec, diff, nW, nB)
-        for i in range(len(nW)):
-            self.weights[i] = self.weights[i]*weightsDecay + nW[i]*learningRate
-            self.biases[i] += nB[i]*learningRate
         return results
 
 
@@ -188,7 +188,7 @@ class GuidedNetwork:
 
 
 def normal_pdf(x, mu, sigma):
-    return (1 / (sigma * math.sqrt(2 * np.pi))) * math.exp(-((x - mu) ** 2) / (2 * sigma ** 2))
+    return (1 / (sigma * math.sqrt(2 * np.pi))+0.0001) * math.exp(-((x - mu) ** 2) / (2 * sigma ** 2 + 0.0001))
 
 
 
@@ -198,8 +198,8 @@ class ReinforcedNetwork:
 
 
     def __init__(self, layers):
-        self.weights = []
-        self.biases = []
+        self.weights : List[np.ndarray] = []
+        self.biases : List[np.ndarray] = []
         for i in range(len(layers)-1):
             self.weights.append(np.random.normal(
                 0,
@@ -246,6 +246,8 @@ class ReinforcedNetwork:
 
         return n_weights, n_biases
 
+    def getDimensions(self):
+        return self.weights[0].shape[1], self.weights[-1].shape[0]
     def getCopiedWeights(self):
         return [i.copy() for i in self.weights], [i.copy() for i in self.biases]
 
@@ -340,8 +342,8 @@ class ReinforcedNetwork:
 class ActorCritic:
 
     def __init__(self):
-        self.actor = ReinforcedNetwork(layers = [8+NUMBER_OF_TARGETS*2, 64, 32, 32, 4])
-        self.critic = GuidedNetwork(layers = [8+NUMBER_OF_TARGETS*2, 32, 32, 1])
+        self.actor : ReinforcedNetwork = ReinforcedNetwork(layers = [8+NUMBER_OF_TARGETS*2, 64, 64, 32, 4])
+        self.critic : GuidedNetwork = GuidedNetwork(layers = [8+NUMBER_OF_TARGETS*2, 32, 32, 1])
 
 
 
@@ -354,8 +356,8 @@ class ActorCritic:
 if True:
     SCORE_TARGET = 20
     SCORE_TIME = 0.05
-    SCORE_SPEED = 0.02
-    SCORE_DIST = 0.008
+    SCORE_SPEED = 0.015
+    SCORE_DIST = 0.001
 
 
 def getReward(stage: Stage):
@@ -455,9 +457,11 @@ def trainN(netAC, maxSteps, desiredAccuracy):
     ticksPerEpisode = 500
     rewardsDecay = 0.97
     learningRate = 0.1
+    learningRateCritic = 0.25
     weightsDecay=0.0001
     steps_in_clipped = 2
-    clipped_deviation = 0.4
+    stepsCritic = 3
+    clipped_deviation = 0.3
 
 
     weightsDecay = 1-weightsDecay
@@ -473,15 +477,15 @@ def trainN(netAC, maxSteps, desiredAccuracy):
         if itersUsed >= maxSteps:
             break
 
-        if floatingAv > 18 and fl==1:
+        if floatingAv > 300 and fl==1:
             global SCORE_TIME, SCORE_SPEED, SCORE_DIST
-            SCORE_TIME *= 4
-            SCORE_SPEED /= 4
-            SCORE_DIST /= 4
+            SCORE_TIME *= 2
+            SCORE_SPEED /= 8
+            SCORE_DIST /= 8
             mxVal = -1e9
             fl = 2
             print("\n"*10+"Difficulty increased")
-        if (itersUsed>=maxSteps/10 and fl==0 and floatingAv>10):
+        if (itersUsed>=maxSteps/10 and fl==0 and floatingAv>150):
             episodesPerIter = 15
             ticksPerEpisode = 500
             learningRate = 0.1
@@ -501,17 +505,13 @@ def trainN(netAC, maxSteps, desiredAccuracy):
             #print(max(max(max(i) for i in j) for j in net.weights))
             samples.append(getSamples(netAC.actor.forward, ticksPerEpisode))
             n_rewards = samples[-1][2]
-            iterReward += sum(n_rewards)/episodesPerIter
-            iterSteps += len(n_rewards)*(1+steps_in_clipped)
-            globReward += sum(n_rewards)
-            itersUsed += len(n_rewards)
-        floatingAvQ.append(iterReward)
-        if len(floatingAvQ)>20:
-            floatingAvQ.pop(0)
-        floatingAv = sum(floatingAvQ)/len(floatingAvQ)
+            iterSteps += len(n_rewards)
+            itersUsed += len(n_rewards)*(1+steps_in_clipped+int(stepsCritic/1.5+0.5))
 
 
         advantages = []
+
+        nW, nB = netAC.critic.getCopiedShapes()
         for samp in range(episodesPerIter):
             n_rewards = samples[samp][2]
             ln = len(n_rewards)
@@ -520,26 +520,30 @@ def trainN(netAC, maxSteps, desiredAccuracy):
                 correspondingRewards[act] = n_rewards[act]+correspondingRewards[act+1]*rewardsDecay
             correspondingRewards = np.array(correspondingRewards[:ln])
 
+            iterReward += sum(correspondingRewards)/episodesPerIter
+            globReward += sum(correspondingRewards)
 
-            expectedRewards = np.zeros(ln)
-            if False:
+
+
+
+            if True:
                 env_states = samples[samp][4]
-                expectedRewards = netAC.critic.backwardsAll(env_states, correspondingRewards/100, learningRate)
-                expectedRewards = np.array([i[0]*100 for i in expectedRewards])
-                for criticIter in range(0):
-                    tpRewards = netAC.critic.backwardsAll(env_states, correspondingRewards/100, learningRate)
-                    tpRewards = np.array([i[0]*100 for i in tpRewards])
-                    if abs(correspondingRewards-tpRewards).sum() < abs(correspondingRewards).sum()/4:
-                        #print("working")
-                        break
-
-
-            #print(correspondingRewards.shape, expectedRewards.shape)
-            if abs(correspondingRewards-expectedRewards).sum() < abs(correspondingRewards).sum()/4:
-                iterRewardExp += sum(expectedRewards)/episodesPerIter
-                #correspondingRewards -= expectedRewards
+                for criticIter in range(stepsCritic):
+                    expectedRewards = netAC.critic.backwardsAll(env_states, correspondingRewards, nW, nB)
+                    expectedRewards = np.array([i[0] for i in expectedRewards])
+                    if criticIter==0:
+                        iterRewardExp += sum(expectedRewards)/episodesPerIter
+                        correspondingRewards -= expectedRewards
             advantages.append(correspondingRewards)
-        #print(netAC.critic.getInfo())
+
+        netAC.critic.applyWeights(nW, nB, learningRate=learningRateCritic/episodesPerIter/ticksPerEpisode)
+
+
+        floatingAvQ.append(iterReward)
+        if len(floatingAvQ)>20:
+            floatingAvQ.pop(0)
+        floatingAv = sum(floatingAvQ)/len(floatingAvQ)
+
 
 
         allRewards = np.array([j for i in advantages for j in i])
@@ -547,7 +551,7 @@ def trainN(netAC, maxSteps, desiredAccuracy):
         stdReward = allRewards.std()
 
         for samp in range(episodesPerIter):
-            advantages[samp] = (np.array(advantages[samp])-meanReward)/max(stdReward, 0.5)
+            advantages[samp] = (np.array(advantages[samp])-meanReward)/(stdReward+0.1)
 
         if True:
             for clip_step in range(steps_in_clipped):
@@ -564,14 +568,14 @@ def trainN(netAC, maxSteps, desiredAccuracy):
                 netAC.actor.applyWeights(nW, nB)
 
 
-        if iterSteps*1.5 > ticksPerEpisode*episodesPerIter:
+        if iterSteps*2 > ticksPerEpisode*episodesPerIter:
             if iterReward > mxVal*0.6:
                 mxVal = max(iterReward, mxVal)
                 bestWeights = netAC.actor.getCopiedWeights()
 
 
-        if iterSteps*1.5 > ticksPerEpisode*episodesPerIter:
-            print(f"{itersUsed}/{maxSteps} | Iteration steady ({iterSteps}), reward: {iterReward} (exp: {iterRewardExp}, av: {floatingAv})")
+        if iterSteps*2 > ticksPerEpisode*episodesPerIter:
+            print(f"{itersUsed}/{maxSteps} | Iteration steady ({iterSteps}), reward: {iterReward} (av: {floatingAv}, exp: {iterRewardExp})")
             print(netAC.actor.getInfo())
         if floatingAv > desiredAccuracy:
             break
@@ -597,7 +601,7 @@ def trainN(netAC, maxSteps, desiredAccuracy):
 
 if True:
 
-    SEED = 149
+    SEED = 150
     random.seed(SEED)
     np.random.seed(SEED)
 
@@ -606,7 +610,7 @@ if True:
     tm = time.time()
     result = 0
     print("training started")
-    result = trainN(nett, 2000000, desiredAccuracy = 1500)
+    result = trainN(nett, 1000000, desiredAccuracy = 50000)
     print(f"average reward = {result}")
     tm1 = time.time()
     print(f"training took {tm1-tm} seconds")
@@ -616,6 +620,22 @@ if True:
     stage = Stage()
     stage.populate()
     Controller(stage, nett.actor).run()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
