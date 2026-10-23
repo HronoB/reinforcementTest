@@ -218,7 +218,8 @@ class Controller:
             deviation_raw = vec[-1][i * 2 + 1]
             expected_real = math.tanh(expected_raw)
             deviation_real = math.tanh(deviation_raw) / 2 + 0.5
-            acts.append(np.random.normal(expected_real, deviation_real))
+            #print(expected_real, deviation_real)
+            acts.append(np.random.normal(expected_real, deviation_real*0.999))
         self.stage.move(tuple(value / 6 for value in acts))
 
     def _loop(self):

@@ -5,110 +5,10 @@ from typing import List
 
 import numpy as np
 
-from stageController import Controller
+from general import *
 
 
-
-NUMBER_OF_TARGETS = 2
-class Stage:
-
-
-    class FlatObject:
-        def __init__(self, seed=0):
-            self.x = 0.5
-            self.y = 0.5
-            self.accels = 3
-            self.vx = [0]*self.accels
-            self.vy = [0]*self.accels
-            self.radius = 0.05
-            self.dead = False
-
-        def collide(self, other: Stage.FlatObject):
-            if (self.x-other.x)**2+(self.y-other.y)**2 < (self.radius+other.radius)**2:
-                return 1
-            return 0
-
-        def move(self, delta):
-            self.x += self.vx[0]*delta
-            self.y += self.vy[0]*delta
-            for i in range(self.accels-1):
-                self.vx[i]+=self.vx[i+1]*delta
-                self.vy[i]+=self.vy[i+1]*delta
-            for i in range(self.accels):
-                decc = delta*0.5/math.factorial(i+1)
-                self.vx[i] /= math.exp(decc)
-                self.vy[i] /= math.exp(decc)
-
-        def accel(self, order, vx, vy):
-            self.vx[order] += vx/math.factorial(order+1)
-            self.vy[order] += vy/math.factorial(order+1)
-
-        def reset(self):
-            self.x = 0.5
-            self.y = 0.5
-            self.vx = [0]*self.accels
-            self.vy = [0]*self.accels
-
-
-    def __init__(self):
-        self.player = Stage.FlatObject()
-        self.targets = []
-        pass
-
-    def getClosestObst(self):
-        closest = self.targets[0]
-        for i in self.targets:
-            if (self.player.x-i.x)**2+(self.player.y-i.y)**2 < (self.player.x-closest.x)**2+(self.player.y-closest.y)**2:
-                closest = i
-        return closest
-
-
-
-    def move(self, vec2):
-        self.player.accel(1, vec2[0], vec2[1])
-
-
-    def collide(self) -> int:
-        result = 0
-        for i in self.targets:
-            score = self.player.collide(i)
-            if score > 0:
-                result += score
-                i.dead = True
-        return result
-
-
-    def populate(self):
-        ix = 0
-        while ix < len(self.targets):
-            if self.targets[ix].dead:
-                self.targets[ix] = self.targets[-1]
-                self.targets.pop()
-            else:
-                ix+=1
-        while len(self.targets)<NUMBER_OF_TARGETS:
-            self.targets.append(Stage.FlatObject())
-            self.targets[-1].x = random.random()
-            self.targets[-1].y = random.random()
-
-    def tick(self, deltaTime = 1.0):
-        self.player.move(deltaTime)
-        self.populate()
-
-
-    def getData(self):
-        self.targets.sort(key=(lambda i: (i.x-self.player.x)**2+(i.y-self.player.y)**2) )
-        arr = np.array([
-            self.player.x, self.player.y,
-            *self.player.vx, *self.player.vy,
-            *[i.x-self.player.x for i in self.targets],
-            *[i.y-self.player.y for i in self.targets],
-        ])
-        return arr
-
-
-
-
+SEED = 0
 
 
 
@@ -188,7 +88,7 @@ class GuidedNetwork:
 
 
 def normal_pdf(x, mu, sigma):
-    return (1 / (sigma * math.sqrt(2 * np.pi))+0.0001) * math.exp(-((x - mu) ** 2) / (2 * sigma ** 2 + 0.0001))
+    return (1 / (sigma * math.sqrt(2 * np.pi)+0.0001)) * math.exp(-((x - mu) ** 2) / (2 * sigma ** 2 + 0.0001))
 
 
 
@@ -265,6 +165,7 @@ class ReinforcedNetwork:
 
 
     def backwardsAll(self, actions, oldProbs, rewards, netStates, temp_weights, temp_biases, mxDev, learningRate):
+        MX_STEP = 500
         ln = len(actions)
         choices = len(netStates[0][-1])//2
 
@@ -305,6 +206,7 @@ class ReinforcedNetwork:
 
 
 
+                deviationReal += 0.001
                 diffU = (action-expectedReal)/deviationReal**2
                 diffU *= 1/math.cosh(expectedRaw)**2
 
@@ -326,10 +228,10 @@ class ReinforcedNetwork:
         lengW += sum(abs(j) for lay in n_weights for i in lay for j in i)
         lengW += sum(abs(i) for lay in n_biases for i in lay)
 
-        if lengW<20:
-            lengW = 5
+        if lengW<MX_STEP:
+            lengW = MX_STEP
+        lengW /= MX_STEP
 
-        lengW /= 5
 
         for i in range(len(temp_weights)):
             temp_weights[i] += n_weights[i]*(learningRate/lengW)
@@ -354,10 +256,10 @@ class ActorCritic:
 
 
 if True:
-    SCORE_TARGET = 20
+    SCORE_TARGET = 30
     SCORE_TIME = 0.05
     SCORE_SPEED = 0.015
-    SCORE_DIST = 0.001
+    SCORE_DIST = 0.01
 
 
 def getReward(stage: Stage):
@@ -407,7 +309,7 @@ def evalOutput(layer):
 
 
 def getSamples(forward, lifeT):
-    stage = Stage()
+    stage = Stage(SEED)
     stage.player.radius *= 0.6
     stage.tick(1.0)
     actions = []
@@ -428,7 +330,7 @@ def getSamples(forward, lifeT):
         stage.tick(0.25)
 
         score = getReward(stage)
-        rewards.append(max(-50, min(50, score)))
+        rewards.append(max(-100, min(50, score)))
 
 
         stage.populate()
@@ -442,6 +344,7 @@ def getSamples(forward, lifeT):
         if (score<-30):
             #print(f"iter {tick} finished early")
             break
+            pass
 
     return actions, actionsProbs, rewards, n_states, env_states
 
@@ -455,11 +358,11 @@ def getSamples(forward, lifeT):
 def trainN(netAC, maxSteps, desiredAccuracy):
     episodesPerIter = 2
     ticksPerEpisode = 500
-    rewardsDecay = 0.97
-    learningRate = 0.1
-    learningRateCritic = 0.25
+    rewardsDecay = 0.98
+    learningRate = 0.01
+    learningRateCritic = 0.1
     weightsDecay=0.0001
-    steps_in_clipped = 2
+    steps_in_clipped = 1
     stepsCritic = 3
     clipped_deviation = 0.3
 
@@ -467,6 +370,9 @@ def trainN(netAC, maxSteps, desiredAccuracy):
     weightsDecay = 1-weightsDecay
     bestWeights = netAC.actor.getCopiedWeights()
     mxVal = -1e9
+
+    stepBuffer = 0
+    bufferReset = 10_000
 
     floatingAvQ = []
     floatingAv = 0
@@ -477,18 +383,18 @@ def trainN(netAC, maxSteps, desiredAccuracy):
         if itersUsed >= maxSteps:
             break
 
-        if floatingAv > 300 and fl==1:
+        if floatingAv > 500 and fl==1:
             global SCORE_TIME, SCORE_SPEED, SCORE_DIST
-            SCORE_TIME *= 2
-            SCORE_SPEED /= 8
-            SCORE_DIST /= 8
+            SCORE_TIME *= 1
+            SCORE_SPEED *= 0.1
+            SCORE_DIST = 0.1
             mxVal = -1e9
             fl = 2
             print("\n"*10+"Difficulty increased")
-        if (itersUsed>=maxSteps/10 and fl==0 and floatingAv>150):
+        if (itersUsed>=maxSteps/10 and fl==0 and floatingAv>0):
             episodesPerIter = 15
             ticksPerEpisode = 500
-            learningRate = 0.1
+            learningRate /= 2
             #net.applyWeights(*bestWeights)
             floatingAvQ = [0]*10
             mxVal = -1e9
@@ -525,7 +431,7 @@ def trainN(netAC, maxSteps, desiredAccuracy):
 
 
 
-
+            advantages.append(correspondingRewards.copy())
             if True:
                 env_states = samples[samp][4]
                 for criticIter in range(stepsCritic):
@@ -533,8 +439,7 @@ def trainN(netAC, maxSteps, desiredAccuracy):
                     expectedRewards = np.array([i[0] for i in expectedRewards])
                     if criticIter==0:
                         iterRewardExp += sum(expectedRewards)/episodesPerIter
-                        correspondingRewards -= expectedRewards
-            advantages.append(correspondingRewards)
+                        advantages[-1] -= expectedRewards
 
         netAC.critic.applyWeights(nW, nB, learningRate=learningRateCritic/episodesPerIter/ticksPerEpisode)
 
@@ -564,7 +469,7 @@ def trainN(netAC, maxSteps, desiredAccuracy):
                 for samp in range(episodesPerIter):
                     old_acts, old_probs, old_rewards, old_states, old_env_states = samples[samp]
                     n_states = list(netAC.actor.forward(i) for i in old_env_states)
-                    netAC.actor.backwardsAll(old_acts, old_probs, advantages[samp], n_states, nW, nB, clipped_deviation, learningRate=learningRate/episodesPerIter/steps_in_clipped)
+                    netAC.actor.backwardsAll(old_acts, old_probs, advantages[samp], n_states, nW, nB, clipped_deviation, learningRate=learningRate/episodesPerIter)
                 netAC.actor.applyWeights(nW, nB)
 
 
@@ -574,14 +479,18 @@ def trainN(netAC, maxSteps, desiredAccuracy):
                 bestWeights = netAC.actor.getCopiedWeights()
 
 
-        if iterSteps*2 > ticksPerEpisode*episodesPerIter:
+        verbose = True
+        if iterSteps*2 < ticksPerEpisode*episodesPerIter and fl!=0:
+            verbose = False
+        if verbose and (itersUsed-stepBuffer)>bufferReset:
+            stepBuffer = itersUsed
             print(f"{itersUsed}/{maxSteps} | Iteration steady ({iterSteps}), reward: {iterReward} (av: {floatingAv}, exp: {iterRewardExp})")
             print(netAC.actor.getInfo())
         if floatingAv > desiredAccuracy:
             break
 
 
-    netAC.actor.applyWeights(*bestWeights)
+    #netAC.actor.applyWeights(*bestWeights)
 
     return globReward/maxSteps
 
@@ -593,15 +502,7 @@ def trainN(netAC, maxSteps, desiredAccuracy):
 
 
 
-
-
-
-
-
-
-if True:
-
-    SEED = 150
+def train_main(maxSteps) -> ActorCritic:
     random.seed(SEED)
     np.random.seed(SEED)
 
@@ -610,19 +511,38 @@ if True:
     tm = time.time()
     result = 0
     print("training started")
-    result = trainN(nett, 1000000, desiredAccuracy = 50000)
+    result = trainN(nett, maxSteps, desiredAccuracy = 50000)
     print(f"average reward = {result}")
     tm1 = time.time()
     print(f"training took {tm1-tm} seconds")
 
-    #exit()
+    return nett
 
-    stage = Stage()
+
+
+def run_main(nett: ActorCritic):
+
+    from stageController import Controller
+
+    stage = Stage(SEED)
     stage.populate()
     Controller(stage, nett.actor).run()
 
 
 
+
+
+if __name__ == "__main__":
+
+    SEED = 150
+
+    if True:
+        nett = train_main(100000)
+        saveWeights(weightsPath(nett.actor.getDimensions()), nett)
+    else:
+        nett = ActorCritic()
+        nett = loadWeights(weightsPath([8+NUMBER_OF_TARGETS*2, 64, 64, 32, 4]), nett)
+        run_main(nett)
 
 
 
